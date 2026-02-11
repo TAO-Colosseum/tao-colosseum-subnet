@@ -58,7 +58,7 @@ TAO Colosseum validators are responsible for:
 ### 1. Clone the Repository
 
 ```bash
-git clone https://github.com/taocolosseum/tao-colosseum-subnet.git
+git clone https://github.com/TAO-Colosseum/tao-colosseum-subnet.git
 cd tao-colosseum-subnet
 ```
 
