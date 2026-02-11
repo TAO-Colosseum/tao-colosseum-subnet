@@ -4,7 +4,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/taocolosseum/tao-colosseum-subnet/blob/main/LICENSE">
+  <a href="https://github.com/TAO-Colosseum/tao-colosseum-subnet/blob/main/LICENSE">
     <img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="License: MIT">
   </a>
   <a href="https://bittensor.com">
@@ -91,7 +91,7 @@
 
 ```bash
 # Clone the repository
-git clone https://github.com/taocolosseum/tao-colosseum-subnet.git
+git clone https://github.com/TAO-Colosseum/tao-colosseum-subnet.git
 cd tao-colosseum-subnet
 
 # Create virtual environment
