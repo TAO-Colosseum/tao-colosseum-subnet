@@ -10,7 +10,7 @@
 
 # Mainnet (uncomment when deploying to mainnet)
 TAO_COLOSSEUM_CONTRACT_ADDRESS = "0x016013CfE6E68590A986C519d869264faa7d2BAB"
-BITTENSOR_EVM_RPC = "https://lite.chain.opentensor.ai"
+BITTENSOR_EVM_RPC = "https://archive.chain.opentensor.ai"
 BITTENSOR_EVM_CHAIN_ID = 964
 
 # Time decay weights for 7 days (index 0 = today, index 6 = 6 days ago)

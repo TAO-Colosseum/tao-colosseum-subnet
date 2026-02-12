@@ -21,6 +21,7 @@ except ImportError:
 from taocolosseum.core.const import (
     TAO_COLOSSEUM_CONTRACT_ADDRESS,
     BITTENSOR_EVM_RPC,
+    BITTENSOR_EVM_CHAIN_ID,
     BLOCKS_PER_DAY,
     TIME_DECAY_WEIGHTS,
 )
@@ -95,6 +96,32 @@ class ContractClient:
         bt.logging.info(
             f"ContractClient initialized: contract={self.contract_address}, rpc={self.rpc_url}"
         )
+        
+        # Verify chain ID matches expected network
+        try:
+            actual_chain_id = self.w3.eth.chain_id
+            if actual_chain_id != BITTENSOR_EVM_CHAIN_ID:
+                bt.logging.warning(
+                    f"CHAIN ID MISMATCH: RPC returned chain_id={actual_chain_id}, "
+                    f"expected {BITTENSOR_EVM_CHAIN_ID}. Wrong network!"
+                )
+            else:
+                bt.logging.info(f"Chain ID verified: {actual_chain_id}")
+        except Exception as e:
+            bt.logging.warning(f"Could not verify chain ID: {e}")
+        
+        # Verify contract exists at address
+        try:
+            code = self.w3.eth.get_code(Web3.to_checksum_address(self.contract_address))
+            if not code or len(code) <= 2:
+                bt.logging.warning(
+                    f"NO CONTRACT CODE at {self.contract_address} on chain {BITTENSOR_EVM_CHAIN_ID}! "
+                    f"Contract may not be deployed or wrong address."
+                )
+            else:
+                bt.logging.info(f"Contract verified: {len(code)} bytes of code at {self.contract_address[:12]}...")
+        except Exception as e:
+            bt.logging.warning(f"Could not verify contract code: {e}")
     
     def is_connected(self) -> bool:
         """Check if connected to the RPC."""
@@ -172,7 +199,7 @@ class ContractClient:
                 'toBlock': to_block_val,
                 'address': self.contract_address,
                 'topics': [
-                    event_signature.hex(),  # Event signature
+                    '0x' + event_signature.hex(),  # Event signature (0x-prefixed)
                     None,                   # gameId (indexed, but we want all)
                     address_topic           # bettor (indexed)
                 ]
