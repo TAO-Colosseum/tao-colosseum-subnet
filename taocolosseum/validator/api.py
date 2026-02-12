@@ -164,10 +164,10 @@ if FASTAPI_AVAILABLE:
         validator = get_validator()
         return {
             "status": "healthy",
-            "block": validator.block,
-            "step": validator.step,
-            "netuid": validator.config.netuid,
-            "uid": validator.uid
+            "block": int(validator.block),
+            "step": int(validator.step),
+            "netuid": int(validator.config.netuid),
+            "uid": int(validator.uid)
         }
     
     
@@ -176,12 +176,12 @@ if FASTAPI_AVAILABLE:
         """Get validator information."""
         validator = get_validator()
         return {
-            "netuid": validator.config.netuid,
-            "uid": validator.uid,
+            "netuid": int(validator.config.netuid),
+            "uid": int(validator.uid),
             "hotkey": validator.wallet.hotkey.ss58_address,
-            "block": validator.block,
-            "step": validator.step,
-            "total_miners": validator.metagraph.n,
+            "block": int(validator.block),
+            "step": int(validator.step),
+            "total_miners": int(validator.metagraph.n),
             "network": validator.subtensor.chain_endpoint
         }
     
@@ -373,13 +373,13 @@ if FASTAPI_AVAILABLE:
         total_volume = sum(volumes.values()) if volumes else 0
         
         return {
-            'block': validator.block,
-            'step': validator.step,
-            'total_miners': validator.metagraph.n,
+            'block': int(validator.block),
+            'step': int(validator.step),
+            'total_miners': int(validator.metagraph.n),
             'active_miners': active_miners,
             'total_score': total_score,
-            'total_weighted_volume': total_volume,
-            'miners_with_volume': len([v for v in volumes.values() if v > 0])
+            'total_weighted_volume': float(total_volume),
+            'miners_with_volume': int(len([v for v in volumes.values() if v > 0]))
         }
     
     
