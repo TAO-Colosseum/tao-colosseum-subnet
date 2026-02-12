@@ -8,3 +8,4 @@ cache/
 *.egg-info/
 contracts/
 validator_data.db
+.env

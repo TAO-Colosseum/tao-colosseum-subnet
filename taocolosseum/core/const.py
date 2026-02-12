@@ -3,19 +3,43 @@
 
 # Constants for TAO Colosseum validator
 
+import os
+
+# Load .env from current directory (or parent) so env vars override defaults below
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass
+
 # Subnet version — change this single value to update version everywhere
 # (setup.py, __init__.py, API, etc.)
 VERSION = "1.1.1"
 
-# TAO Colosseum Contract on Bittensor EVM Testnet
-# TAO_COLOSSEUM_CONTRACT_ADDRESS = "0x074A77a378D6cA63286CD4A020CdBfc9696132a7"
-# BITTENSOR_EVM_RPC = "https://test.chain.opentensor.ai"
-# BITTENSOR_EVM_CHAIN_ID = 945
+# RPC and contract: use env vars from .env if set, else these defaults
+# (see .env.example for TAO_COLOSSEUM_CONTRACT_ADDRESS, BITTENSOR_EVM_RPC, BITTENSOR_EVM_CHAIN_ID)
+_DEFAULT_CONTRACT = "0x016013CfE6E68590A986C519d869264faa7d2BAB"
+_DEFAULT_RPC = "https://archive.chain.opentensor.ai"
+_DEFAULT_CHAIN_ID = 964
 
-# Mainnet (uncomment when deploying to mainnet)
-TAO_COLOSSEUM_CONTRACT_ADDRESS = "0x016013CfE6E68590A986C519d869264faa7d2BAB"
-BITTENSOR_EVM_RPC = "https://archive.chain.opentensor.ai"
-BITTENSOR_EVM_CHAIN_ID = 964
+def _env(key: str, default: str) -> str:
+    v = os.environ.get(key, default)
+    return (v or default).strip().strip('"\'') or default
+
+
+def _env_int(key: str, default: int) -> int:
+    v = (os.environ.get(key) or "").strip()
+    if not v:
+        return default
+    try:
+        return int(v)
+    except ValueError:
+        return default
+
+
+TAO_COLOSSEUM_CONTRACT_ADDRESS = _env("TAO_COLOSSEUM_CONTRACT_ADDRESS", _DEFAULT_CONTRACT)
+BITTENSOR_EVM_RPC = _env("BITTENSOR_EVM_RPC", _DEFAULT_RPC)
+BITTENSOR_EVM_CHAIN_ID = _env_int("BITTENSOR_EVM_CHAIN_ID", _DEFAULT_CHAIN_ID)
 
 # Time decay weights for 7 days (index 0 = today, index 6 = 6 days ago)
 # Most recent activity gets highest weight
