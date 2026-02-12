@@ -1,11 +1,22 @@
 # The MIT License (MIT)
 # Copyright © 2026 TAO Colosseum
 
+import re
 from setuptools import setup, find_packages
+
+
+def get_version():
+    """Read VERSION from const.py without importing the package."""
+    with open("taocolosseum/core/const.py") as f:
+        match = re.search(r'VERSION\s*=\s*"([^"]+)"', f.read())
+    if not match:
+        raise RuntimeError("VERSION not found in taocolosseum/core/const.py")
+    return match.group(1)
+
 
 setup(
     name="taocolosseum",
-    version="1.0.0",
+    version=get_version(),
     description="TAO Colosseum - P2P betting on Bittensor EVM with validator incentives",
     author="TAO Colosseum",
     packages=find_packages(),

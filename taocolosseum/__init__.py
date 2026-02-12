@@ -16,8 +16,10 @@
 # OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 # DEALINGS IN THE SOFTWARE.
 
-# Define the version of the template module.
-__version__ = "0.0.0"
+# Version is defined once in core/const.py — all consumers import from there.
+from taocolosseum.core.const import VERSION
+
+__version__ = VERSION
 version_split = __version__.split(".")
 __spec_version__ = (
     (1000 * int(version_split[0]))

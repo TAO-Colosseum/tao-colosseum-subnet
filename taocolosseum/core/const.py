@@ -3,6 +3,10 @@
 
 # Constants for TAO Colosseum validator
 
+# Subnet version — change this single value to update version everywhere
+# (setup.py, __init__.py, API, etc.)
+VERSION = "1.1.0"
+
 # TAO Colosseum Contract on Bittensor EVM Testnet
 # TAO_COLOSSEUM_CONTRACT_ADDRESS = "0x074A77a378D6cA63286CD4A020CdBfc9696132a7"
 # BITTENSOR_EVM_RPC = "https://test.chain.opentensor.ai"
