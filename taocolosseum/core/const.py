@@ -3,14 +3,18 @@
 
 # Constants for TAO Colosseum validator
 
+# Subnet version — change this single value to update version everywhere
+# (setup.py, __init__.py, API, etc.)
+VERSION = "1.1.0"
+
 # TAO Colosseum Contract on Bittensor EVM Testnet
 # TAO_COLOSSEUM_CONTRACT_ADDRESS = "0x074A77a378D6cA63286CD4A020CdBfc9696132a7"
 # BITTENSOR_EVM_RPC = "https://test.chain.opentensor.ai"
 # BITTENSOR_EVM_CHAIN_ID = 945
 
 # Mainnet (uncomment when deploying to mainnet)
-TAO_COLOSSEUM_CONTRACT_ADDRESS = "0x65f4fb569a6CD0ab13D6cDa5092Aa1e888BF0678"
-BITTENSOR_EVM_RPC = "https://lite.chain.opentensor.ai"
+TAO_COLOSSEUM_CONTRACT_ADDRESS = "0x016013CfE6E68590A986C519d869264faa7d2BAB"
+BITTENSOR_EVM_RPC = "https://archive.chain.opentensor.ai"
 BITTENSOR_EVM_CHAIN_ID = 964
 
 # Time decay weights for 7 days (index 0 = today, index 6 = 6 days ago)

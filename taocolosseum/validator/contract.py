@@ -21,10 +21,28 @@ except ImportError:
 from taocolosseum.core.const import (
     TAO_COLOSSEUM_CONTRACT_ADDRESS,
     BITTENSOR_EVM_RPC,
+    BITTENSOR_EVM_CHAIN_ID,
     BLOCKS_PER_DAY,
     TIME_DECAY_WEIGHTS,
 )
 from taocolosseum.validator.database import cache_bet_event, get_cached_bet_events
+
+
+def _is_rate_limit_error(e: Exception) -> bool:
+    """Heuristic: exception message/str suggests RPC rate limit or throttling."""
+    s = (str(e) or "").lower()
+    return any(
+        x in s
+        for x in (
+            "429",
+            "rate limit",
+            "rate_limit",
+            "too many request",
+            "throttl",
+            "quota exceeded",
+            "limit exceeded",
+        )
+    )
 
 
 # TAO Colosseum contract ABI - only the functions/events we need
@@ -75,7 +93,35 @@ class ContractClient:
             abi=colosseum_ABI
         )
         
-        bt.logging.info(f"ContractClient initialized: {self.contract_address}")
+        bt.logging.info(
+            f"ContractClient initialized: contract={self.contract_address}, rpc={self.rpc_url}"
+        )
+        
+        # Verify chain ID matches expected network
+        try:
+            actual_chain_id = self.w3.eth.chain_id
+            if actual_chain_id != BITTENSOR_EVM_CHAIN_ID:
+                bt.logging.warning(
+                    f"CHAIN ID MISMATCH: RPC returned chain_id={actual_chain_id}, "
+                    f"expected {BITTENSOR_EVM_CHAIN_ID}. Wrong network!"
+                )
+            else:
+                bt.logging.info(f"Chain ID verified: {actual_chain_id}")
+        except Exception as e:
+            bt.logging.warning(f"Could not verify chain ID: {e}")
+        
+        # Verify contract exists at address
+        try:
+            code = self.w3.eth.get_code(Web3.to_checksum_address(self.contract_address))
+            if not code or len(code) <= 2:
+                bt.logging.warning(
+                    f"NO CONTRACT CODE at {self.contract_address} on chain {BITTENSOR_EVM_CHAIN_ID}! "
+                    f"Contract may not be deployed or wrong address."
+                )
+            else:
+                bt.logging.info(f"Contract verified: {len(code)} bytes of code at {self.contract_address[:12]}...")
+        except Exception as e:
+            bt.logging.warning(f"Could not verify contract code: {e}")
     
     def is_connected(self) -> bool:
         """Check if connected to the RPC."""
@@ -144,16 +190,23 @@ class ContractClient:
             address_topic = '0x' + checksum_address[2:].lower().zfill(64)
             
             # Use eth.get_logs directly - most reliable approach
+            bt.logging.info(
+                f"get_logs: address={address[:10]}...0x{address[-6:]} "
+                f"from_block={from_block} to_block={to_block_val} contract={self.contract_address[:10]}..."
+            )
             logs = self.w3.eth.get_logs({
                 'fromBlock': from_block,
                 'toBlock': to_block_val,
                 'address': self.contract_address,
                 'topics': [
-                    event_signature.hex(),  # Event signature
+                    '0x' + event_signature.hex(),  # Event signature (0x-prefixed)
                     None,                   # gameId (indexed, but we want all)
                     address_topic           # bettor (indexed)
                 ]
             })
+            bt.logging.info(
+                f"get_logs returned {len(logs)} log(s) for {address[:10]}...0x{address[-6:]}"
+            )
             
             bet_events = []
             for log in logs:
@@ -196,7 +249,15 @@ class ContractClient:
             return bet_events
             
         except Exception as e:
-            bt.logging.warning(f"Error getting bet events for {address}: {e}")
+            bt.logging.warning(
+                f"get_logs failed for {address[:10]}... from_block={from_block} "
+                f"to_block={to_block or 'latest'}: {type(e).__name__}: {e}"
+            )
+            if _is_rate_limit_error(e):
+                bt.logging.warning(
+                    "RPC rate limit or throttling suspected (429/rate limit in error). "
+                    "Consider using a dedicated RPC or increasing request spacing."
+                )
             return []
     
     def get_bets_last_7_days(self, address: str) -> List[Dict]:
@@ -212,6 +273,10 @@ class ContractClient:
         try:
             current_block = self.get_current_block()
             from_block = max(0, current_block - (BLOCKS_PER_DAY * 7))
+            bt.logging.info(
+                f"get_bets_last_7_days: {address[:10]}...0x{address[-6:]} "
+                f"from_block={from_block} current_block={current_block}"
+            )
             
             # First check cache (only for current contract)
             seven_days_ago = int((datetime.utcnow() - timedelta(days=7)).timestamp())
@@ -244,10 +309,27 @@ class ContractClient:
                 for e in new_events
             ]
             
+            if len(all_events) == 0:
+                bt.logging.info(
+                    f"get_bets_last_7_days: {address[:10]}... returned 0 events "
+                    f"(no bets in range or RPC returned none)"
+                )
+            else:
+                bt.logging.info(
+                    f"get_bets_last_7_days: {address[:10]}... returned {len(all_events)} event(s) "
+                    f"(cached={len(cached_events)}, from_chain={len(new_events)})"
+                )
             return all_events
             
         except Exception as e:
-            bt.logging.warning(f"Error getting 7-day bets for {address}: {e}")
+            bt.logging.warning(
+                f"get_bets_last_7_days failed for {address[:10]}...: {type(e).__name__}: {e}"
+            )
+            if _is_rate_limit_error(e):
+                bt.logging.warning(
+                    "RPC rate limit or throttling suspected (429/rate limit in error). "
+                    "Consider using a dedicated RPC or increasing request spacing."
+                )
             return []
 
 
@@ -307,7 +389,11 @@ def get_miner_volume(client: ContractClient, evm_address: str) -> tuple:
         bet_events = client.get_bets_last_7_days(evm_address)
         return calculate_time_decayed_volume(bet_events)
     except Exception as e:
-        bt.logging.warning(f"Error getting miner volume: {e}")
+        bt.logging.warning(f"Error getting miner volume for {evm_address[:10]}...: {type(e).__name__}: {e}")
+        if _is_rate_limit_error(e):
+            bt.logging.warning(
+                "RPC rate limit or throttling suspected. Consider dedicated RPC or request spacing."
+            )
         return 0.0, [0.0] * 7
 
 

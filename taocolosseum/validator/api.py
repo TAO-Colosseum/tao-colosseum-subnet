@@ -19,7 +19,7 @@ except ImportError:
     FASTAPI_AVAILABLE = False
     bt.logging.warning("fastapi not installed. Install with: pip install fastapi uvicorn")
 
-from taocolosseum.core.const import API_HOST, API_PORT
+from taocolosseum.core.const import API_HOST, API_PORT, VERSION
 from taocolosseum.validator.database import (
     get_latest_snapshot,
     get_snapshots,
@@ -75,7 +75,7 @@ if FASTAPI_AVAILABLE:
     app = FastAPI(
         title="TAO Colosseum Validator API",
         description="API for querying TAO Colosseum validator state, miner scores, and betting volumes",
-        version="1.0.0"
+        version=VERSION
     )
     
     # Enable CORS for frontend access
@@ -154,7 +154,7 @@ if FASTAPI_AVAILABLE:
         return {
             "status": "ok",
             "service": "TAO Colosseum Validator",
-            "version": "1.0.0"
+            "version": VERSION
         }
     
     
