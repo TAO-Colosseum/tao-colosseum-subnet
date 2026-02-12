@@ -101,6 +101,11 @@ async def forward(self):
             bt.logging.warning("Not connected to Bittensor EVM RPC")
             time.sleep(VOLUME_CHECK_INTERVAL)
             return
+        
+        bt.logging.info(
+            f"Volume check: RPC={getattr(client, 'rpc_url', '?')} "
+            f"contract={getattr(client, 'contract_address', '?')[:18]}..."
+        )
             
     except Exception as e:
         bt.logging.error(f"Failed to initialize contract client: {e}")
@@ -111,6 +116,7 @@ async def forward(self):
     volumes = {}
     daily_volumes = {}
     active_count = 0
+    miners_with_mapping_no_volume = 0
     
     bt.logging.info(f"Querying volumes for {self.metagraph.n} miners...")
     
@@ -136,6 +142,12 @@ async def forward(self):
                     f"UID {uid}: {weighted_vol:.4f} TAO weighted volume "
                     f"(daily: {[f'{v:.2f}' for v in daily_vols]})"
                 )
+            else:
+                miners_with_mapping_no_volume += 1
+                bt.logging.info(
+                    f"UID {uid} has EVM mapping {evm_address[:10]}...0x{evm_address[-6:]} "
+                    f"but volume=0 (no events in last 7d or RPC/get_logs issue)"
+                )
             
             # Update database
             update_miner_data(
@@ -156,8 +168,8 @@ async def forward(self):
     self.miner_daily_volumes = daily_volumes
     
     bt.logging.info(
-        f"Volume check complete: {active_count}/{self.metagraph.n} miners "
-        f"with betting activity"
+        f"Volume check complete: {active_count}/{self.metagraph.n} miners with betting activity, "
+        f"{miners_with_mapping_no_volume} with mapping but zero volume"
     )
     
     # Calculate rewards based on volumes
@@ -184,7 +196,10 @@ async def forward(self):
         )
         self.update_scores(reward_array.tolist(), uids)
     else:
-        bt.logging.info("No miners with betting volume - running burn code")
+        bt.logging.info(
+            "No miners with betting volume (active_count=0) - running burn code; "
+            "check RPC/get_logs logs above for get_bets_last_7_days and get_logs"
+        )
         reward_array = np.zeros(self.metagraph.n, dtype=np.float32)
         reward_array[0] = 1.0
         uids = list(range(self.metagraph.n))
