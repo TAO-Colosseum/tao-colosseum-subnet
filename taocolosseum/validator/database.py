@@ -463,6 +463,10 @@ def save_wallet_mapping(
     """
     Save or update a wallet mapping (coldkey -> EVM address).
     
+    If the EVM address is already mapped to a different coldkey, the old
+    mapping is replaced: the EVM address will now be associated with the
+    requested coldkey (so one EVM address can only be linked to one coldkey).
+    
     Args:
         coldkey: Bittensor coldkey (SS58 format)
         evm_address: EVM wallet address
@@ -475,15 +479,27 @@ def save_wallet_mapping(
     """
     conn = _get_connection()
     cursor = conn.cursor()
+    evm_normalized = evm_address.lower()
     
     try:
+        # If this EVM address is already mapped to another coldkey, remove that
+        # mapping so it can be reassigned to the requesting coldkey
+        cursor.execute(
+            'DELETE FROM wallet_mappings WHERE evm_address = ?',
+            (evm_normalized,)
+        )
+        if cursor.rowcount > 0:
+            bt.logging.info(
+                f"Replaced existing EVM mapping for {evm_address[:10]}... with new coldkey {coldkey[:10]}..."
+            )
+        
         cursor.execute('''
             INSERT OR REPLACE INTO wallet_mappings 
             (coldkey, evm_address, signature, message, timestamp, verified_at)
             VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
         ''', (
             coldkey,
-            evm_address.lower(),  # Normalize EVM address to lowercase
+            evm_normalized,
             signature,
             message,
             timestamp
