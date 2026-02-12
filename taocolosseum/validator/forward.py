@@ -124,8 +124,31 @@ async def forward(self):
         coldkey = self.metagraph.coldkeys[uid]
         hotkey = self.metagraph.hotkeys[uid]
         
-        # Get EVM address for this miner
-        evm_address = self.miner_evm_addresses.get(uid) or _get_miner_evm_address(coldkey)
+        # Always query DB for the current EVM mapping (never rely solely on cache).
+        # This ensures remaps are picked up immediately on the next forward step.
+        evm_address = _get_miner_evm_address(coldkey)
+        
+        cached_evm = self.miner_evm_addresses.get(uid)
+        
+        # Detect mapping changes: old coldkey lost its EVM, or EVM changed
+        if cached_evm and cached_evm != evm_address:
+            bt.logging.info(
+                f"UID {uid} EVM mapping changed: {cached_evm[:10]}... -> "
+                f"{evm_address[:10] + '...' if evm_address else 'NONE'} "
+                f"(coldkey {coldkey[:10]}...). Resetting volume to 0."
+            )
+            # Clear stale cache entry — this coldkey no longer owns the old EVM
+            self.miner_evm_addresses.pop(uid, None)
+            # Zero out this UID's stored miner data so stale volume doesn't persist
+            update_miner_data(
+                uid=uid,
+                hotkey=hotkey,
+                coldkey=coldkey,
+                evm_address=evm_address,
+                daily_volumes=[0.0] * 7,
+                weighted_volume=0.0,
+                score=0.0
+            )
         
         if evm_address:
             self.miner_evm_addresses[uid] = evm_address

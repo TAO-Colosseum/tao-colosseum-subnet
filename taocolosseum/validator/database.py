@@ -482,16 +482,57 @@ def save_wallet_mapping(
     evm_normalized = evm_address.lower()
     
     try:
-        # If this EVM address is already mapped to another coldkey, remove that
-        # mapping so it can be reassigned to the requesting coldkey
+        # Check if this EVM address is already mapped to another coldkey
         cursor.execute(
-            'DELETE FROM wallet_mappings WHERE evm_address = ?',
+            'SELECT coldkey FROM wallet_mappings WHERE evm_address = ?',
             (evm_normalized,)
         )
-        if cursor.rowcount > 0:
-            bt.logging.info(
-                f"Replaced existing EVM mapping for {evm_address[:10]}... with new coldkey {coldkey[:10]}..."
+        old_row = cursor.fetchone()
+        old_coldkey = old_row[0] if old_row else None
+        
+        if old_coldkey and old_coldkey != coldkey:
+            # EVM is being remapped from old_coldkey -> new coldkey.
+            # 1) Remove the old wallet mapping
+            cursor.execute(
+                'DELETE FROM wallet_mappings WHERE evm_address = ?',
+                (evm_normalized,)
             )
+            bt.logging.info(
+                f"Replaced existing EVM mapping for {evm_address[:10]}... "
+                f"(old coldkey {old_coldkey[:10]}... -> new coldkey {coldkey[:10]}...)"
+            )
+            
+            # 2) Zero out the old coldkey's miner_data so stale volume
+            #    doesn't persist for the previous owner
+            cursor.execute('''
+                UPDATE miner_data
+                SET evm_address = NULL,
+                    daily_volumes_json = ?,
+                    weighted_volume = 0,
+                    score = 0,
+                    last_updated = CURRENT_TIMESTAMP
+                WHERE coldkey = ? AND evm_address = ?
+            ''', (
+                json.dumps([0.0] * 7),
+                old_coldkey,
+                evm_normalized,
+            ))
+            if cursor.rowcount > 0:
+                bt.logging.info(
+                    f"Cleared miner_data for old coldkey {old_coldkey[:10]}... "
+                    f"(EVM {evm_address[:10]}... remapped)"
+                )
+            
+            # 3) Remove cached bet_events for this EVM address so the new
+            #    owner starts fresh from the blockchain
+            cursor.execute(
+                'DELETE FROM bet_events WHERE evm_address = ?',
+                (evm_normalized,)
+            )
+            if cursor.rowcount > 0:
+                bt.logging.info(
+                    f"Cleared cached bet_events for {evm_address[:10]}... (EVM remapped)"
+                )
         
         cursor.execute('''
             INSERT OR REPLACE INTO wallet_mappings 
