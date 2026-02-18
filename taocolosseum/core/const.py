@@ -18,7 +18,7 @@ VERSION = "1.1.1"
 
 # RPC and contract: use env vars from .env if set, else these defaults
 # (see .env.example for TAO_COLOSSEUM_CONTRACT_ADDRESS, BITTENSOR_EVM_RPC, BITTENSOR_EVM_CHAIN_ID)
-_DEFAULT_CONTRACT = "0x016013CfE6E68590A986C519d869264faa7d2BAB"
+_DEFAULT_CONTRACT = "0x1AA674a98976a6Ee24b3C05bb74675f9417818ad"
 _DEFAULT_RPC = "https://archive.chain.opentensor.ai"
 _DEFAULT_CHAIN_ID = 964
 
