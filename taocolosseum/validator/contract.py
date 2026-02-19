@@ -73,6 +73,20 @@ colosseum_ABI = [
         ],
         "name": "BetPlaced",
         "type": "event"
+    },
+    # GameResolved event - only games with a winner; tied/cancelled games do not emit this
+    {
+        "anonymous": False,
+        "inputs": [
+            {"indexed": True, "name": "gameId", "type": "uint256"},
+            {"indexed": False, "name": "winningSide", "type": "uint8"},
+            {"indexed": False, "name": "redPool", "type": "uint256"},
+            {"indexed": False, "name": "bluePool", "type": "uint256"},
+            {"indexed": False, "name": "redBettors", "type": "uint256"},
+            {"indexed": False, "name": "blueBettors", "type": "uint256"}
+        ],
+        "name": "GameResolved",
+        "type": "event"
     }
 ]
 
@@ -92,6 +106,8 @@ class ContractClient:
             address=Web3.to_checksum_address(self.contract_address),
             abi=colosseum_ABI
         )
+        # Cache for resolved game IDs (same block range reused across miners in one volume check)
+        self._resolved_cache: Optional[tuple] = None  # (from_block, to_block, set) or None
         
         bt.logging.info(
             f"ContractClient initialized: contract={self.contract_address}, rpc={self.rpc_url}"
@@ -260,15 +276,67 @@ class ContractClient:
                 )
             return []
     
+    def get_resolved_game_ids(self, from_block: int, to_block: int = None) -> set:
+        """
+        Get set of game IDs that were resolved with a winner in the block range.
+        Tied/cancelled games do not emit GameResolved, so their bets must be excluded from volume.
+        
+        Args:
+            from_block: Starting block
+            to_block: Ending block (default: latest)
+            
+        Returns:
+            Set of game_id (int) that have a winner
+        """
+        try:
+            to_block_val = to_block if to_block is not None else self.w3.eth.block_number
+            if self._resolved_cache is not None:
+                c_from, c_to, c_set = self._resolved_cache
+                if c_from == from_block and c_to == to_block_val:
+                    return c_set
+            resolved = set()
+            event_signature = self.w3.keccak(
+                text="GameResolved(uint256,uint8,uint256,uint256,uint256,uint256)"
+            )
+            logs = self.w3.eth.get_logs({
+                'fromBlock': from_block,
+                'toBlock': to_block_val,
+                'address': self.contract_address,
+                'topics': ['0x' + event_signature.hex()]
+            })
+            for log in logs:
+                try:
+                    decoded = self.contract.events.GameResolved().process_log(log)
+                    resolved.add(decoded['args']['gameId'])
+                except Exception as decode_err:
+                    bt.logging.debug(f"Error decoding GameResolved log: {decode_err}")
+                    continue
+            if resolved:
+                bt.logging.debug(
+                    f"get_resolved_game_ids: {from_block}..{to_block_val} -> {len(resolved)} resolved game(s)"
+                )
+            self._resolved_cache = (from_block, to_block_val, resolved)
+            return resolved
+        except Exception as e:
+            bt.logging.warning(
+                f"get_resolved_game_ids failed from_block={from_block} to_block={to_block}: {e}"
+            )
+            if _is_rate_limit_error(e):
+                bt.logging.warning(
+                    "RPC rate limit suspected (GameResolved fetch). Consider dedicated RPC."
+                )
+            return set()
+    
     def get_bets_last_7_days(self, address: str) -> List[Dict]:
         """
-        Get all bets from the last 7 days for an address.
+        Get bets from the last 7 days for an address that belong to resolved games only.
+        Tied/cancelled games are excluded so volume cannot be gamed by refunded bets.
         
         Args:
             address: EVM address to query
             
         Returns:
-            List of bet event dicts
+            List of bet event dicts (only from games that emitted GameResolved)
         """
         try:
             current_block = self.get_current_block()
@@ -286,18 +354,18 @@ class ContractClient:
                 contract_address=self.contract_address
             )
             
+            new_events = []
             if cached_events:
-                # Get only new events since last cached
                 last_cached_block = max(e['block_number'] for e in cached_events)
-                if last_cached_block >= current_block - 100:  # Within 100 blocks, use cache
-                    bt.logging.debug(f"Using cached events for {address[:10]}...")
-                    return cached_events
-                from_block = last_cached_block + 1
+                if last_cached_block < current_block - 100:
+                    from_block = last_cached_block + 1
+                    new_events = self.get_bet_events(address, from_block)
+                else:
+                    bt.logging.debug(f"Using cached events only for {address[:10]}...")
+            else:
+                new_events = self.get_bet_events(address, from_block)
             
-            # Query new events from chain
-            new_events = self.get_bet_events(address, from_block)
-            
-            # Combine cached and new events
+            # Combine cached and new events (or cached only if cache is fresh)
             all_events = cached_events + [
                 {
                     'game_id': e['game_id'],
@@ -309,17 +377,29 @@ class ContractClient:
                 for e in new_events
             ]
             
-            if len(all_events) == 0:
+            # Only count volume from games that were resolved with a winner (exclude tied/cancelled)
+            from_block = max(0, current_block - (BLOCKS_PER_DAY * 7))
+            resolved_game_ids = self.get_resolved_game_ids(from_block, current_block)
+            filtered_events = [e for e in all_events if e['game_id'] in resolved_game_ids]
+            excluded = len(all_events) - len(filtered_events)
+            if excluded > 0:
+                bt.logging.debug(
+                    f"get_bets_last_7_days: excluded {excluded} bet(s) from tied/cancelled games "
+                    f"({len(filtered_events)} from resolved games)"
+                )
+            
+            if len(filtered_events) == 0:
                 bt.logging.info(
                     f"get_bets_last_7_days: {address[:10]}... returned 0 events "
-                    f"(no bets in range or RPC returned none)"
+                    f"(no bets in range, or RPC returned none, or all from tied/cancelled games)"
                 )
             else:
                 bt.logging.info(
-                    f"get_bets_last_7_days: {address[:10]}... returned {len(all_events)} event(s) "
-                    f"(cached={len(cached_events)}, from_chain={len(new_events)})"
+                    f"get_bets_last_7_days: {address[:10]}... returned {len(filtered_events)} event(s) "
+                    f"(cached={len(cached_events)}, from_chain={len(new_events)}, "
+                    f"resolved_only; raw total was {len(all_events)})"
                 )
-            return all_events
+            return filtered_events
             
         except Exception as e:
             bt.logging.warning(
