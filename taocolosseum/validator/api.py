@@ -57,7 +57,8 @@ if FASTAPI_AVAILABLE:
     class WalletMappingData(BaseModel):
         coldkey: str = Field(..., description="SS58 Bittensor coldkey address")
         evmAddress: str = Field(..., description="EVM wallet address with 0x prefix")
-        signature: str = Field(..., description="Hex signature without 0x prefix")
+        signature: str = Field(..., description="Coldkey hex signature without 0x prefix")
+        evmSignature: str = Field(..., description="EVM personal_sign hex signature (with or without 0x)")
         message: str = Field(..., description="Signed message wrapped in <Bytes>...</Bytes>")
         timestamp: int = Field(..., description="Unix timestamp in milliseconds")
         verified: bool = Field(..., description="UI format validation passed")
@@ -86,6 +87,22 @@ if FASTAPI_AVAILABLE:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+
+
+def _message_plaintext(message: str) -> str:
+    """Extract inner content from <Bytes>...</Bytes> wrapped message."""
+    if not message.startswith('<Bytes>') or not message.endswith('</Bytes>'):
+        return ""
+    return message[7:-8]  # strip <Bytes> and </Bytes>
+
+
+def _verify_message_binding(plaintext: str, coldkey: str, evm_address: str) -> bool:
+    """
+    Verify that the signed message content binds this coldkey and EVM address.
+    Expected format: "Link <coldkey> to <evm_address> at <timestamp>"
+    """
+    evm_lower = evm_address.lower()
+    return coldkey in plaintext and evm_lower in plaintext.lower()
 
 
 def _verify_coldkey_signature(coldkey: str, message: str, signature: str) -> bool:
@@ -126,6 +143,49 @@ def _verify_coldkey_signature(coldkey: str, message: str, signature: str) -> boo
         return False  # NEVER accept without verification - security critical
     except Exception as e:
         bt.logging.error(f"Signature verification failed: {e}")
+        return False
+
+
+def _verify_evm_signature(plaintext: str, evm_address: str, evm_signature_hex: str) -> bool:
+    """
+    Verify an EVM personal_sign (EIP-191) signature.
+    The client must sign the same plaintext (e.g. "Link <coldkey> to <evm> at <ts>") with their EVM key.
+    
+    Args:
+        plaintext: The message text that was signed (no <Bytes> wrapper)
+        evm_address: Expected signer address (0x...)
+        evm_signature_hex: Hex signature with or without 0x prefix (130 or 132 chars)
+        
+    Returns:
+        True if the signature was produced by the given EVM address
+    """
+    try:
+        from eth_account import Account
+        from eth_account.messages import encode_defunct
+        
+        sig = evm_signature_hex.strip()
+        if not sig.startswith('0x'):
+            sig = '0x' + sig
+        if len(sig) != 132:  # 0x + 130 hex chars
+            bt.logging.warning(f"EVM signature length invalid: expected 132 chars, got {len(sig)}")
+            return False
+        
+        signable = encode_defunct(text=plaintext)
+        recovered = Account.recover_message(signable, signature=sig)
+        evm_normalized = evm_address.lower()
+        is_valid = recovered.lower() == evm_normalized
+        if is_valid:
+            bt.logging.info(f"EVM signature verified for {evm_address[:10]}...")
+        else:
+            bt.logging.warning(
+                f"EVM signature mismatch: recovered {recovered[:10]}..., expected {evm_address[:10]}..."
+            )
+        return is_valid
+    except ImportError as e:
+        bt.logging.error(f"EVM signature verification not available ({e}) - REJECTING for security")
+        return False
+    except Exception as e:
+        bt.logging.error(f"EVM signature verification failed: {e}")
         return False
 
 
@@ -398,10 +458,13 @@ if FASTAPI_AVAILABLE:
         - type: "wallet_mapping"
         - data.coldkey: SS58 Bittensor coldkey address
         - data.evmAddress: EVM wallet address (0x...)
-        - data.signature: Hex signature (128 chars, no 0x prefix)
+        - data.signature: Coldkey hex signature (128 chars, no 0x prefix)
+        - data.evmSignature: EVM personal_sign hex (130 hex chars, with or without 0x)
         - data.message: Signed message with <Bytes>...</Bytes> wrapper
         - data.timestamp: Unix timestamp in milliseconds
         - data.verified: UI validation passed (server still verifies)
+
+        Both coldkey and EVM must sign the same binding message to prove ownership of both wallets.
         """
         try:
             # SECURITY: Reject all requests if signature verification is unavailable
@@ -435,11 +498,23 @@ if FASTAPI_AVAILABLE:
                     detail="Invalid EVM address format"
                 )
             
-            # Validate signature format (128 hex chars, no 0x prefix)
+            # Validate coldkey signature format (128 hex chars, no 0x prefix)
             if len(data.signature) != 128:
                 raise HTTPException(
                     status_code=400,
-                    detail=f"Invalid signature length: expected 128, got {len(data.signature)}"
+                    detail=f"Invalid coldkey signature length: expected 128, got {len(data.signature)}"
+                )
+            
+            # Validate EVM signature format (130 hex chars with or without 0x)
+            evm_sig = data.evmSignature.strip()
+            if evm_sig.startswith('0x'):
+                evm_sig_raw = evm_sig[2:]
+            else:
+                evm_sig_raw = evm_sig
+            if len(evm_sig_raw) != 130 or not all(c in '0123456789abcdefABCDEF' for c in evm_sig_raw):
+                raise HTTPException(
+                    status_code=400,
+                    detail="Invalid EVM signature: expected 130 hex chars (with or without 0x prefix)"
                 )
             
             # Validate message format (must have <Bytes>...</Bytes> wrapper)
@@ -449,26 +524,53 @@ if FASTAPI_AVAILABLE:
                     detail="Message must be wrapped in <Bytes>...</Bytes>"
                 )
             
-            # Verify the signature (cryptographic verification)
-            is_valid = _verify_coldkey_signature(
+            plaintext = _message_plaintext(data.message)
+            if not plaintext:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Invalid message content"
+                )
+            
+            # Require message to bind this coldkey and EVM address (prevents claiming someone else's EVM)
+            if not _verify_message_binding(plaintext, data.coldkey, data.evmAddress):
+                raise HTTPException(
+                    status_code=400,
+                    detail="Message must contain both coldkey and EVM address (format: Link <coldkey> to <evm> at <timestamp>)"
+                )
+            
+            # Verify coldkey signature
+            if not _verify_coldkey_signature(
                 coldkey=data.coldkey,
                 message=data.message,
                 signature=data.signature
-            )
-            
-            if not is_valid:
+            ):
                 raise HTTPException(
                     status_code=400,
-                    detail="Invalid signature"
+                    detail="Invalid coldkey signature"
                 )
             
+            # Verify EVM signature (proves ownership of the EVM address)
+            if not _verify_evm_signature(
+                plaintext=plaintext,
+                evm_address=data.evmAddress,
+                evm_signature_hex=data.evmSignature
+            ):
+                raise HTTPException(
+                    status_code=400,
+                    detail="Invalid EVM signature or address mismatch"
+                )
+            
+            evm_sig_stored = data.evmSignature.strip()
+            if not evm_sig_stored.startswith('0x'):
+                evm_sig_stored = '0x' + evm_sig_stored
             # Save the wallet mapping
             success = save_wallet_mapping(
                 coldkey=data.coldkey,
                 evm_address=data.evmAddress,
                 signature=data.signature,
                 message=data.message,
-                timestamp=data.timestamp
+                timestamp=data.timestamp,
+                evm_signature=evm_sig_stored
             )
             
             if not success:
