@@ -26,6 +26,7 @@ setup(
         "requests>=2",
         "bittensor>=9.11",
         "web3>=6.0.0",
+        "eth-account>=0.10.0",
         "fastapi>=0.100.0",
         "uvicorn>=0.23.0",
         "substrate-interface",

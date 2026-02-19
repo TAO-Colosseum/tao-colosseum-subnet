@@ -87,39 +87,50 @@ You should see your UID in the TAO Colosseum subnet.
 
 ## Step 2: Link Coldkey to EVM Address
 
-Validators need to know which EVM address belongs to which miner. You must link your Bittensor coldkey to your EVM address by signing a message.
+Validators need to know which EVM address belongs to which miner. You must link your Bittensor coldkey to your EVM address by signing a **binding message with both wallets**. Both signatures are required so that no one can claim another user's EVM address.
 
 ### Option A: Using the TAO Colosseum Frontend (Recommended)
 
 1. Visit the TAO Colosseum web interface
 2. Connect your Bittensor wallet (via Polkadot.js extension)
 3. Connect your EVM wallet (MetaMask)
-4. Sign the linking message with your coldkey
-5. The frontend will submit the mapping to validators
+4. Sign the linking message with your **coldkey**
+5. Sign the **same message** with your EVM wallet (personal_sign)
+6. The frontend will submit both signatures to validators
 
 ### Option B: Manual Mapping
 
-If you need to register programmatically:
+If you need to register programmatically, you must sign the same binding message with both the coldkey and the EVM key:
 
 ```python
-from substrateinterface import Keypair
+import time
 import requests
+from substrateinterface import Keypair
+from eth_account import Account
+from eth_account.messages import encode_defunct
 
 # Your details
-COLDKEY_SS58 = "5..."  # Your coldkey address
-EVM_ADDRESS = "0x..."   # Your EVM address
+COLDKEY_SS58 = "5..."   # Your coldkey address
+EVM_ADDRESS = "0x..."   # Your EVM address (must be the one that signs)
 VALIDATOR_API = "http://validator-ip:8000"
 
-# Create the message
+# Create the same binding message for both signatures
 timestamp = int(time.time() * 1000)
 message_content = f"Link {COLDKEY_SS58} to {EVM_ADDRESS} at {timestamp}"
 message = f"<Bytes>{message_content}</Bytes>"
 
-# Sign with coldkey
+# 1) Sign with coldkey (Bittensor)
 keypair = Keypair.create_from_uri("//your/mnemonic")  # Or load from file
 signature = keypair.sign(message).hex()
 
-# Submit to validator
+# 2) Sign the same plaintext with EVM wallet (personal_sign)
+#    Use your EVM private key or sign via MetaMask and paste the signature
+signable = encode_defunct(text=message_content)
+evm_account = Account.from_key("YOUR_EVM_PRIVATE_KEY_HEX")  # or use sign_message with a key
+evm_signed = evm_account.sign_message(signable)
+evm_signature = evm_signed.signature.hex()  # 0x-prefixed, 132 chars
+
+# Submit to validator (both signatures required)
 response = requests.post(
     f"{VALIDATOR_API}/api/wallet-mapping",
     json={
@@ -128,6 +139,7 @@ response = requests.post(
             "coldkey": COLDKEY_SS58,
             "evmAddress": EVM_ADDRESS,
             "signature": signature,
+            "evmSignature": evm_signature,
             "message": message,
             "timestamp": timestamp,
             "verified": True

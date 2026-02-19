@@ -14,7 +14,7 @@ except ImportError:
 
 # Subnet version — change this single value to update version everywhere
 # (setup.py, __init__.py, API, etc.)
-VERSION = "1.2.0"
+VERSION = "1.2.1"
 
 # RPC and contract: use env vars from .env if set, else these defaults
 # (see .env.example for TAO_COLOSSEUM_CONTRACT_ADDRESS, BITTENSOR_EVM_RPC, BITTENSOR_EVM_CHAIN_ID)
