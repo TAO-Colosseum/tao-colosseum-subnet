@@ -131,6 +131,13 @@ def init_db():
         ON wallet_mappings(evm_address)
     ''')
     
+    # Migration: add evm_signature column if missing (dual-signature requirement)
+    cursor.execute("PRAGMA table_info(wallet_mappings)")
+    columns = [row[1] for row in cursor.fetchall()]
+    if 'evm_signature' not in columns:
+        cursor.execute('ALTER TABLE wallet_mappings ADD COLUMN evm_signature TEXT')
+        bt.logging.info("Added evm_signature column to wallet_mappings")
+    
     conn.commit()
     conn.close()
     bt.logging.info("Database initialized successfully")
@@ -458,7 +465,8 @@ def save_wallet_mapping(
     evm_address: str,
     signature: str,
     message: str,
-    timestamp: int
+    timestamp: int,
+    evm_signature: Optional[str] = None
 ) -> bool:
     """
     Save or update a wallet mapping (coldkey -> EVM address).
@@ -470,9 +478,10 @@ def save_wallet_mapping(
     Args:
         coldkey: Bittensor coldkey (SS58 format)
         evm_address: EVM wallet address
-        signature: Hex signature (without 0x prefix)
+        signature: Coldkey hex signature (without 0x prefix)
         message: The signed message
         timestamp: Unix timestamp in milliseconds
+        evm_signature: EVM personal_sign hex (with 0x prefix), optional for backward compat
         
     Returns:
         True if saved successfully, False otherwise
@@ -536,14 +545,15 @@ def save_wallet_mapping(
         
         cursor.execute('''
             INSERT OR REPLACE INTO wallet_mappings 
-            (coldkey, evm_address, signature, message, timestamp, verified_at)
-            VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+            (coldkey, evm_address, signature, message, timestamp, verified_at, evm_signature)
+            VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP, ?)
         ''', (
             coldkey,
             evm_normalized,
             signature,
             message,
-            timestamp
+            timestamp,
+            evm_signature or ''
         ))
         conn.commit()
         bt.logging.info(f"Wallet mapping saved: {coldkey[:10]}... -> {evm_address[:10]}...")
