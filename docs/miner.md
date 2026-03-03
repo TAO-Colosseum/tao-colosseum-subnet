@@ -1,3 +1,248 @@
+# ⛏️ TAO Colosseum Miner Guide (RPS Tournament)
+
+This guide explains how to participate as a miner in the TAO Colosseum subnet after migrating from the old underdog game to the new **RPS Tournament** smart contract.
+
+---
+
+## Overview
+
+In TAO Colosseum, miners earn rewards by participating on the Bittensor EVM game contract. The game is now a **single-elimination Rock-Paper-Scissors (RPS) tournament** with commit/reveal rounds and drand tie-break fallback.
+
+### How Mining Works
+
+1. Register on subnet and get a UID.
+2. Link coldkey to EVM wallet (dual signature required).
+3. Join and play RPS tournaments from your mapped EVM wallet.
+4. Validators index your tournament activity volume and convert it into miner score.
+
+---
+
+## Prerequisites
+
+- Bittensor wallet (coldkey + hotkey)
+- TAO for subnet registration
+- EVM wallet (MetaMask or equivalent) with TAO on Bittensor EVM
+- Ability to sign:
+  - coldkey payloads (`<Bytes>...</Bytes>`)
+  - EVM `personal_sign` messages
+
+---
+
+## Step 1: Register on the Subnet
+
+### Install Bittensor
+
+```bash
+pip install bittensor
+```
+
+### Create wallet (if needed)
+
+```bash
+btcli wallet new_coldkey --wallet.name miner
+btcli wallet new_hotkey --wallet.name miner --wallet.hotkey default
+```
+
+### Register on TAO Colosseum subnet
+
+```bash
+btcli subnet register \
+  --netuid <TAO_COLOSSEUM_NETUID> \
+  --wallet.name miner \
+  --wallet.hotkey default \
+  --subtensor.network finney
+```
+
+### Verify UID
+
+```bash
+btcli wallet overview --wallet.name miner --subtensor.network finney
+```
+
+---
+
+## Step 2: Link Coldkey to EVM Address
+
+Validators need to map your miner identity (coldkey) to your EVM address.
+
+### Security model (required)
+
+Wallet mapping requires **two signatures on the same binding message**:
+
+- Coldkey signature (substrate)
+- EVM signature (`personal_sign`)
+
+This prevents fake mapping attempts where someone tries to map their coldkey to another person's EVM address.
+
+### Binding message format
+
+Plaintext:
+
+```text
+Link <COLDKEY_SS58> to <EVM_ADDRESS> at <TIMESTAMP_MS>
+```
+
+Coldkey-signed message:
+
+```text
+<Bytes>Link <COLDKEY_SS58> to <EVM_ADDRESS> at <TIMESTAMP_MS></Bytes>
+```
+
+### API payload
+
+`POST /api/wallet-mapping`
+
+```json
+{
+  "type": "wallet_mapping",
+  "data": {
+    "coldkey": "5...",
+    "evmAddress": "0x...",
+    "signature": "<coldkey hex sig, no 0x>",
+    "evmSignature": "<evm personal_sign hex, with or without 0x>",
+    "message": "<Bytes>Link ...</Bytes>",
+    "timestamp": 1700000000000,
+    "verified": true
+  }
+}
+```
+
+---
+
+## Step 3: Fund your EVM wallet
+
+You need TAO on Bittensor EVM to join tournaments.
+
+1. Bridge TAO to Bittensor EVM.
+2. Add Bittensor EVM network in wallet:
+   - RPC: `https://lite.chain.opentensor.ai`
+   - Chain ID: `964`
+   - Symbol: `TAO`
+
+---
+
+## Step 4: Play RPS Tournaments
+
+The old Red/Blue underdog game is removed. Mining activity now comes from **RPS tournaments**.
+
+### Tournament lifecycle
+
+1. **Create / discover tournament**
+   - Tournament sizes: `4`, `8`, or `16` players.
+2. **Register**
+   - Join during registration window.
+   - Entry must be exact and at least `0.5 TAO` (contract minimum).
+3. **Start**
+   - Tournament starts when full, or registration ends with enough players.
+4. **Commit move**
+   - Submit move hash during commit window.
+5. **Reveal move**
+   - Reveal `Rock`, `Paper`, or `Scissors` during reveal window.
+6. **Resolve match**
+   - If tied, replay (up to max rounds), then drand tiebreak if needed.
+7. **Advance rounds**
+   - Single elimination until one winner remains.
+8. **Claim prize**
+   - Winner claims tournament pot minus platform fee.
+
+### RPS windows and defaults
+
+- Commit window: `10` blocks
+- Reveal window: `10` blocks
+- Max RPS rounds per match: `3`
+- Platform fee: `1.5%` (taken at prize claim)
+
+### Important behavior
+
+- Commit/reveal is strict. Missing commit/reveal can lose the match.
+- Ties are replayed; unresolved final ties use drand randomness.
+- Stalled tournaments can be canceled/refunded via contract escape hatches.
+
+---
+
+## Step 5: Claim funds
+
+Depending on outcome:
+
+- **Tournament winner**: claim prize from completed tournament.
+- **Refund paths** (if canceled/unstartable/stalled): use pending-withdrawal flow.
+
+In frontend, expose both:
+
+- `claimPrize(tournamentId)`
+- `withdrawPending()`
+
+---
+
+## How scoring works (miner perspective)
+
+Validators score miners from mapped EVM wallet activity on the **RPS Tournament** game.
+
+- Your score depends on your relative qualifying volume vs other miners.
+- Recent activity has stronger weight (time-decayed, validator-side).
+- Activity from refunded/canceled game flow should not be treated as productive volume.
+
+If your score is lower than expected, check:
+
+- wallet mapping correctness
+- that activity was done from the mapped EVM address
+- tournament state (completed vs canceled/stalled/refunded path)
+
+---
+
+
+## Troubleshooting
+
+### "No wallet mapping found"
+
+Link coldkey and EVM again (Step 2). Ensure both signatures are provided.
+
+### "Zero volume"
+
+Possible causes:
+
+- No qualifying tournament activity in scoring window
+- Played from a different EVM than mapped wallet
+- Activity was refunded/canceled path and not counted
+- Validator has not refreshed data yet
+
+### Commit/reveal issues
+
+- Commit hash mismatch: verify `abi.encode(...)` fields and salt usage.
+- Reveal too early/late: verify block windows and submit in correct phase.
+- Match unresolved: trigger permissionless resolve flow from UI/backend.
+
+---
+
+## Best practices
+
+1. Keep wallet mapping up to date.
+2. Participate consistently instead of occasional bursts.
+3. Do not miss reveal windows.
+4. Monitor score/volume from validator API.
+5. Keep private keys and mnemonics offline and secure.
+
+---
+
+## FAQ
+
+**Q: Do I still need to place Red/Blue bets?**  
+A: No. The old underdog game is removed. Mining activity is now from RPS tournaments.
+
+**Q: Do I need to run miner software?**  
+A: Not for gameplay itself. You participate on-chain and validators score your mapped activity.
+
+**Q: Why do I need both coldkey and EVM signatures for mapping?**  
+A: To prove ownership of both identities and prevent fake coldkey/EVM links.
+
+**Q: Where do I see current standing?**  
+A: Use validator endpoints: `/scores`, `/volumes`, `/leaderboard`.
+
+---
+
+<p align="center">
+  <b>Good luck in the bracket. Play smart. 🥊</b>
+</p>
 # ⛏️ TAO Colosseum Miner Guide
 
 This guide explains how to participate as a miner in the TAO Colosseum subnet.
